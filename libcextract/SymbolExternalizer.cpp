@@ -33,22 +33,6 @@
    FileEntry => FileID that we are sure to have modifications.  */
 #pragma GCC poison translateFile
 
-/****** Begin hack: used to get a pointer to a private member of a class. *****/
-struct ASTUnit_TopLevelDecls
-{
-  typedef std::vector<Decl*> ASTUnit::*type;
-  friend type Get(ASTUnit_TopLevelDecls);
-};
-
-template<typename Tag, typename Tag::type M>
-struct Rob {
-  friend typename Tag::type Get(Tag) {
-    return M;
-  }
-};
-
-template struct Rob<ASTUnit_TopLevelDecls, &ASTUnit::TopLevelDecls>;
-
 /** Get pointer to the TopLevelDecls vector in the ASTUnit.
  *
  * The TopLevelDecls attribute from the AST is private, but we need to
@@ -56,11 +40,7 @@ template struct Rob<ASTUnit_TopLevelDecls, &ASTUnit::TopLevelDecls>;
  * else we can't remove further declarations of the function we need
  * to externalize.
  */
-static std::vector<Decl *>* Get_Pointer_To_Toplev(ASTUnit *obj)
-{
-  return &(obj->*Get(ASTUnit_TopLevelDecls()));
-}
-/****************************** End hack.  ***********************************/
+extern std::vector<Decl *>* Get_Pointer_To_Toplev(ASTUnit *obj);
 
 #define EXTERNALIZED_PREFIX "klpe_"
 #define RENAME_PREFIX       "klpp_"

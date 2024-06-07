@@ -44,6 +44,11 @@ void Print_AST(ASTUnit *ast)
   }
 }
 
+/** Filesystem that will be used in our custom ASTUnit::create, so that way we
+  * don't break clang's API.  See ASTUnitHack.cpp.
+  */
+extern IntrusiveRefCntPtr<llvm::vfs::FileSystem> _Hack_VFS;
+
 static bool Build_ASTUnit(PassManager::Context *ctx, IntrusiveRefCntPtr<vfs::FileSystem> fs = nullptr)
 {
   ctx->AST.reset();
@@ -64,6 +69,8 @@ static bool Build_ASTUnit(PassManager::Context *ctx, IntrusiveRefCntPtr<vfs::Fil
     fs = ctx->OFS;
   }
 
+  _Hack_VFS = fs;
+
   /* Built the ASTUnit from the passed command line and set its SourceManager
      to the PrettyPrint class.  */
   DiagnosticOptions *diagopts = new DiagnosticOptions();
@@ -74,12 +81,13 @@ static bool Build_ASTUnit(PassManager::Context *ctx, IntrusiveRefCntPtr<vfs::Fil
   Diags = CompilerInstance::createDiagnostics(diagopts);
   CInvok = ClangCompat::createInvocationFromCommandLine(ctx->ClangArgs, Diags);
 
-  FileManager *FileMgr = new FileManager(FileSystemOptions(), fs);
   PCHContainerOps = std::make_shared<PCHContainerOperations>();
 
-  auto AU = ASTUnit::LoadFromCompilerInvocation(
-      CInvok, PCHContainerOps, Diags, FileMgr, false, CaptureDiagsKind::None, 1,
-      TU_Complete, false, false, false);
+  auto AU = ASTUnit::create(CInvok, Diags, CaptureDiagsKind::None, false);
+  ASTUnit::LoadFromCompilerInvocationAction(CInvok, PCHContainerOps,
+                                            Diags, nullptr, AU.get());
+
+  _Hack_VFS = nullptr;
 
   if (AU == nullptr) {
     DiagsClass::Emit_Error("Unable to create ASTUnit object.");
