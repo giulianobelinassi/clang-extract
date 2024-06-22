@@ -119,3 +119,34 @@ Decl *Get_Bodyless_Or_Itself(Decl *decl)
   Decl *bodyless = Get_Bodyless_Decl(decl);
   return bodyless ? bodyless : decl;
 }
+
+// Get a "file:line:column" source location string.
+std::string getSourceLocationString(Preprocessor &PP, SourceLocation Loc)
+{
+  if (Loc.isInvalid())
+    return std::string("(none)");
+
+  if (Loc.isFileID()) {
+    PresumedLoc PLoc = PP.getSourceManager().getPresumedLoc(Loc);
+
+    if (PLoc.isInvalid()) {
+      return std::string("(invalid)");
+    }
+
+    std::string Str;
+    llvm::raw_string_ostream SS(Str);
+
+    // The macro expansion and spelling pos is identical for file locs.
+    SS << "\"" << PLoc.getFilename() << ':' << PLoc.getLine() << ':'
+       << PLoc.getColumn() << "\"";
+
+    std::string Result = SS.str();
+
+    // YAML treats backslash as escape, so use forward slashes.
+    std::replace(Result.begin(), Result.end(), '\\', '/');
+
+    return Result;
+  }
+
+  return std::string("(nonfile)");
+}

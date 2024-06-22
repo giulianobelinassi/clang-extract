@@ -74,3 +74,6 @@ Decl         *Get_Bodyless_Decl(Decl *decl);
 FunctionDecl *Get_Bodyless_Or_Itself(FunctionDecl *decl);
 TagDecl      *Get_Bodyless_Or_Itself(TagDecl *decl);
 Decl         *Get_Bodyless_Or_Itself(Decl *decl);
+
+// Get a "file:line:column" source location string.
+std::string getSourceLocationString(Preprocessor &PP, SourceLocation Loc);

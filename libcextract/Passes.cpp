@@ -26,9 +26,11 @@
 #include "NonLLVMMisc.hh"
 #include "Error.hh"
 #include "HeaderGenerate.hh"
+#include "ExtendedPreprocessingRecord.hh"
 
 #include "clang/Frontend/ASTUnit.h"
 #include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendActions.h"
 
 #include <iostream>
 
@@ -83,9 +85,10 @@ static bool Build_ASTUnit(PassManager::Context *ctx, IntrusiveRefCntPtr<vfs::Fil
 
   PCHContainerOps = std::make_shared<PCHContainerOperations>();
 
+  PPHooksAction ppta;
   auto AU = ASTUnit::create(CInvok, Diags, CaptureDiagsKind::None, false);
   ASTUnit::LoadFromCompilerInvocationAction(CInvok, PCHContainerOps,
-                                            Diags, nullptr, AU.get());
+                                            Diags, &ppta, AU.get());
 
   _Hack_VFS = nullptr;
 
