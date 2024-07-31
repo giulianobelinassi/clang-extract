@@ -139,9 +139,8 @@ class ExternalizerVisitor: public RecursiveASTVisitor<ExternalizerVisitor>
         sym->NewDecl = new_decl;
         sym->Done = true;
         sym->Wrap = !SE.Ibt;
-        SE.Log.push_back({.OldName = sym_name,
-                         .NewName = new_name,
-                         .Type = type});
+        /* Log entry is added in Late_Externalize(), once we may discard
+           externalizations due to it not being covered by the closure.  */
       }
     } else if (type == ExternalizationType::WEAK) {
       /* Now checks if this is a function or a variable delcaration.  */
@@ -283,9 +282,10 @@ bool SymbolExternalizer::Drop_Static(FunctionDecl *decl)
   return false;
 }
 
-bool SymbolExternalizer::Add_Extern(FunctionDecl *decl)
+template <typename DECL>
+bool SymbolExternalizer::Drop_Static_Add_Extern(DECL *decl)
 {
-  if (decl->isStatic()) {
+  if (decl->getStorageClass() == StorageClass::SC_Static) {
     auto ids = Get_Range_Of_Identifier(decl->getSourceRange(), StringRef("static"));
     assert(ids.size() > 0 && "static decl without static keyword?");
 
@@ -295,6 +295,22 @@ bool SymbolExternalizer::Add_Extern(FunctionDecl *decl)
     /* Update the storage class.  */
     decl->setStorageClass(StorageClass::SC_Extern);
 
+    return true;
+  }
+
+  return false;
+}
+
+template <typename DECL>
+bool SymbolExternalizer::Add_Extern(DECL *decl)
+{
+  StorageClass storage = decl->getStorageClass();
+  if (storage == StorageClass::SC_Static) {
+    Drop_Static_Add_Extern(decl);
+    return true;
+  } else if (storage == StorageClass::SC_None) {
+    Insert_Text(decl->getBeginLoc(), "extern ");
+    decl->setStorageClass(StorageClass::SC_Extern);
     return true;
   }
 
@@ -842,6 +858,65 @@ void SymbolExternalizer::Compute_SymbolsMap_Late_Insert_Locations(std::vector<Sy
   }
 }
 
+void SymbolExternalizer::Drop_Function_Body(FunctionDecl *decl)
+{
+  if (decl->doesThisDeclarationHaveABody()) {
+    Stmt *body = decl->getBody();
+    Replace_Text(body->getSourceRange(), ";", 1000);
+  }
+}
+
+void SymbolExternalizer::Drop_Var_Initializer(VarDecl *decl)
+{
+  if (decl->hasInit() && decl->getInitStyle() == VarDecl::InitializationStyle::CInit) {
+    Expr *init = decl->getInit();
+    SourceLocation init_loc = init->getSourceRange().getBegin();
+    SourceLocation head = init_loc.getLocWithOffset(-1);
+
+    /* Search for the '=' initializer token.  */
+    while (true) {
+      StringRef text = PrettyPrint::Get_Source_Text({head, init_loc});
+      if (*text.data() == '=') {
+        break;
+      }
+      head = head.getLocWithOffset(-1);
+    }
+
+    Replace_Text({head, init->getSourceRange().getEnd()}, ";", 1000);
+  }
+}
+
+void SymbolExternalizer::Handle_IBT_Ext(SymbolUpdateStatus *sym)
+{
+  /* Get the last usage (more recent decl), and check if it was the
+   * first usage. If yes, drop the declartion and use the NewDecl form
+   * SymbolUpdateStatus.
+   *
+   * For functions, drop the declarations and change the later
+   * prototypes to have the extern storage type.
+   *
+   * For variables, remove all references but the first one, because
+   * this will also be replaced by outstr (NewDecl from
+   * SymbolUpdateStatus).
+   */
+  Decl *ibt_decl = sym->OldDecl->getMostRecentDecl();
+  if (FunctionDecl *func = dyn_cast<FunctionDecl>(ibt_decl)) {
+    while (func) {
+      Drop_Function_Body(func);
+      Drop_Static_Add_Extern(func);
+
+      func = func->getPreviousDecl();
+    }
+  } else if (VarDecl *var = dyn_cast<VarDecl>(ibt_decl)) {
+    while (var) {
+      Add_Extern(var);
+      Drop_Var_Initializer(var);
+
+      var = var->getPreviousDecl();
+    }
+  }
+}
+
 void SymbolExternalizer::Late_Externalize(void)
 {
   SymbolExternalizer &SE = *this;
@@ -856,22 +931,22 @@ void SymbolExternalizer::Late_Externalize(void)
       continue;
     }
 
+    if (Ibt) {
+      /* When IBT is enabled we handle things a little differently.  We don't
+         do Late Externalization but rather change the symbols in where they
+         were defined once we need to change them to extern and drop bodies.  */
+      Handle_IBT_Ext(sym);
+
+      /* Remember that we externalized it.  */
+      Log.push_back({.OldName = sym->OldDecl->getName().str(),
+                     .NewName = sym->NewDecl->getName().str(),
+                     .Type = sym->ExtType});
+      continue;
+    }
+
     /* Create a string with the new variable type and name.  */
     std::string o;
     llvm::raw_string_ostream outstr(o);
-
-    /*
-     * It won't be a problem to add the code below multiple times, since
-     * clang-extract will remove ifndefs for already defined macros
-     */
-    if (SE.Ibt) {
-      outstr << "#ifndef KLP_RELOC_SYMBOL_POS\n"
-                "# define KLP_RELOC_SYMBOL_POS(LP_OBJ_NAME, SYM_OBJ_NAME, SYM_NAME, SYM_POS) \\\n"
-                "   asm(\"\\\".klp.sym.rela.\" #LP_OBJ_NAME \".\" #SYM_OBJ_NAME \".\" #SYM_NAME \",\" #SYM_POS \"\\\"\")\n"
-                "# define KLP_RELOC_SYMBOL(LP_OBJ_NAME, SYM_OBJ_NAME, SYM_NAME) \\\n"
-                "   KLP_RELOC_SYMBOL_POS(LP_OBJ_NAME, SYM_OBJ_NAME, SYM_NAME, 0)\n"
-                "#endif\n\n";
-    }
 
     /*
      * Get the location of the original decl so we can output the right comment
@@ -883,14 +958,6 @@ void SymbolExternalizer::Late_Externalize(void)
     sym->NewDecl->print(outstr);
 
     std::string sym_name = sym->OldDecl->getName().str();
-    if (SE.Ibt) {
-      std::string sym_mod = SE.IA.Get_Symbol_Module(sym_name);
-      if (sym_mod == "")
-        sym_mod = "vmlinux";
-
-      outstr << " \\\n" << "\tKLP_RELOC_SYMBOL(" << SE.PatchObject << ", " <<
-             sym_mod << ", " << sym_name << ")";
-    }
     outstr << ";\n";
 
     /* In case we successfully have a late insertion location, put the new decl
@@ -904,56 +971,20 @@ void SymbolExternalizer::Late_Externalize(void)
         SE.Remove_Text(sym->OldDecl->getSourceRange(), 1000);
       }
     } else {
-      if (SE.Ibt) {
-          /* Get the last usage (more recent decl), and check if it was the
-           * first usage. If yes, drop the declartion and use the NewDecl form
-           * SymbolUpdateStatus.
-           *
-           * For functions, drop the declarations and change the later
-           * prototypes to have the extern storage type.
-           *
-           * For variables, remove all references but the first one, because
-           * this will also be replaced by outstr (NewDecl from
-           * SymbolUpdateStatus).
-           */
-          Decl *ibt_decl = sym->OldDecl->getMostRecentDecl();
-          if (FunctionDecl *func = dyn_cast<FunctionDecl>(ibt_decl)) {
-            while (func) {
-              if (!func->getPreviousDecl()) {
-                SE.Replace_Text(func->getSourceRange(), outstr.str(), 1000);
-                break;
-              }
+      /* Fallback to the old method of rewriting the declaration.  */
+      SE.Replace_Text(sym->OldDecl->getSourceRange(), outstr.str(), 1000);
 
-              if (func->doesThisDeclarationHaveABody()) {
-                SE.Remove_Text(func->getSourceRange(), 1000);
-              } else {
-                Add_Extern(func);
-              }
-
-              func = func->getPreviousDecl();
-            }
-          } else if (VarDecl *var = dyn_cast<VarDecl>(ibt_decl)) {
-            while (var) {
-              if (!var->getPreviousDecl()) {
-                SE.Replace_Text(var->getSourceRange(), outstr.str(), 1000);
-                break;
-              }
-
-              SE.Remove_Text(var->getSourceRange(), 1000);
-              var = var->getPreviousDecl();
-            }
-          }
-      } else {
-        /* Fallback to the old method of rewriting the declaration.  */
-        SE.Replace_Text(sym->OldDecl->getSourceRange(), outstr.str(), 1000);
-
-        /* Emit a warning for debuging purposes for now.  */
-        if (AllowLateExternalization) {
-          std::string msg = "LateLocation of " + sym->OldDecl->getName().str() + " is invalid\n";
-          DiagsClass::Emit_Warn(msg);
-        }
+      /* Emit a warning for debuging purposes for now.  */
+      if (AllowLateExternalization) {
+        std::string msg = "LateLocation of " + sym->OldDecl->getName().str() + " is invalid\n";
+        DiagsClass::Emit_Warn(msg);
       }
     }
+
+    /* Remember that we externalized it.  */
+    Log.push_back({.OldName = sym->OldDecl->getName().str(),
+                   .NewName = sym->NewDecl->getName().str(),
+                   .Type = sym->ExtType});
   }
 }
 
