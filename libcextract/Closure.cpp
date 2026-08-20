@@ -372,6 +372,27 @@ bool DeclClosureVisitor::VisitClassTemplateSpecializationDecl(
 
 /* ----------- Statements -------------- */
 
+bool DeclClosureVisitor::VisitMemberExpr(MemberExpr *expr)
+{
+  /* Make sure we grow the closure towards the RecordDecl that contains
+     the FieldDecl accessed by the MemberExpr,  for example, if clang see:
+
+     a->x;
+
+     it should grow the closure to include:
+
+     struct AA {
+      int x;
+     }  */
+
+  if (FieldDecl *field = dyn_cast<FieldDecl>(expr->getMemberDecl())) {
+    RecordDecl *record = field->getParent();
+    return TraverseDecl(record);
+  }
+
+  return VISITOR_CONTINUE;
+}
+
 bool DeclClosureVisitor::VisitDeclRefExpr(DeclRefExpr *expr)
 {
   TRY_TO(TraverseDecl(expr->getDecl()));
