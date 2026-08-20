@@ -214,6 +214,8 @@ class DeclClosureVisitor : public RecursiveASTVisitor<DeclClosureVisitor>
 
   /* ----------- Statements -------------- */
 
+  bool VisitMemberExpr(MemberExpr *expr);
+
   bool VisitDeclRefExpr(DeclRefExpr *expr);
 
   bool VisitOffsetOfExpr(OffsetOfExpr *expr);
