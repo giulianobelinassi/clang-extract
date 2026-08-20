@@ -122,7 +122,7 @@ void FunctionDependencyFinder::Remove_Redundant_Decls(void)
               PrettyPrint::Get_Source_Text(type_range) != "") {
 
             /* Using .fullyContains() fails in some declarations.  */
-            if (PrettyPrint::Contains_From_LineCol(range, type_range)) {
+            if (PrettyPrint::Contains(range, type_range)) {
               closure.Remove_Decl(typedecl);
             }
           }
