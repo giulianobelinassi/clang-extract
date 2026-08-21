@@ -47,6 +47,7 @@ class PassManager {
         Context(ArgvParser &args)
           : FuncExtractNames(args.Get_Functions_To_Extract()),
             Externalize(args.Get_Symbols_To_Externalize()),
+            NotExternalize(args.Get_Symbols_To_Not_Externalize()),
             OutputFile(args.Get_Output_File()),
             IgnoreClangErrors(args.Get_Ignore_Clang_Errors()),
             ExternalizationDisabled(args.Is_Externalization_Disabled()),
@@ -88,6 +89,9 @@ class PassManager {
 
         /** List of functions to externalize.  */
         std::vector<std::string> &Externalize;
+
+        /** List of functions to not externalize.  */
+        std::vector<std::string> &NotExternalize;
 
         /** The final output file name.  */
         std::string &OutputFile;

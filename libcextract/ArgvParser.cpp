@@ -62,6 +62,7 @@ ArgvParser::ArgvParser(int argc, char **argv)
   : ArgsToClang(),
     FunctionsToExtract(),
     SymbolsToExternalize(),
+    SymbolsToNotExternalize(),
     HeadersToExpand(),
     HeadersToNotExpand(),
     OutputFile(),
@@ -104,6 +105,20 @@ ArgvParser::ArgvParser(int argc, char **argv)
     if (obj_path.find(PatchObject) == std::string::npos)
       PatchObject = "vmlinux";
   }
+
+  /* Check for contradictory options.  */
+  for (auto it = SymbolsToNotExternalize.begin();
+       it != SymbolsToNotExternalize.end(); it++) {
+    for (auto ij = SymbolsToExternalize.begin(); ij != SymbolsToExternalize.end(); ij++) {
+      if (*it == *ij) {
+        std::string message = "symbol " + *ij + " is marked for expansion and "
+                                                "not expansion at the same time!";
+        DiagsClass::Emit_Error(message);
+        exit(1);
+      }
+    }
+  }
+
 }
 
 void ArgvParser::Insert_Required_Parameters(void)
@@ -149,6 +164,8 @@ void ArgvParser::Print_Usage_Message(void)
 "                           Extract the functions specified in the <args> list.\n"
 "  -DCE_EXPORT_SYMBOLS=<args>\n"
 "                           Force externalization of symbols specified in the <args> list\n"
+"  -DCE_NOT_EXPORT_SYMBOLS=<args>\n"
+"                           Do not externalize symbols specified in the <args> list\n"
 "  -DCE_OUTPUT_FILE=<arg>   Output code to <arg> file.  Default is <input>.CE.c.\n"
 "  -DCE_NO_EXTERNALIZATION  Disable symbol externalization.\n"
 "  -DCE_DUMP_PASSES         Dump the results of each transformation pass into files.\n"
@@ -228,6 +245,11 @@ bool ArgvParser::Handle_Clang_Extract_Arg(const char *str)
   }
   if (prefix("-DCE_EXPORT_SYMBOLS=", str)) {
     SymbolsToExternalize = Extract_Args(str);
+
+    return true;
+  }
+  if (prefix("-DCE_NOT_EXPORT_SYMBOLS=", str)) {
+    SymbolsToNotExternalize = Extract_Args(str);
 
     return true;
   }
