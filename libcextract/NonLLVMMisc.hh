@@ -58,6 +58,28 @@ void Remove_Duplicates(std::vector<T>& vec)
   vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
 }
 
+template <typename T>
+bool Remove_Elements_Present_In_2nd_Vector(std::vector<T>& v1, const std::vector<T> &v2)
+{
+  bool ret = false;
+
+  if (v2.size() == 0)
+    return false;
+
+  /* Remove any element in to_externalize that is in NotExternalize.  */
+  for (auto it = v1.begin(); it != v1.end(); it++) {
+    for (auto ij = v2.begin(); ij != v2.end(); ij++) {
+      if (*it == *ij) {
+        v1.erase(it);
+        it--;
+        ret = true;
+      }
+    }
+  }
+
+  return ret;
+}
+
 /** Get a single line from a file, removing its newline.
   *
   * NOTE: if this function return a valid pointer, it must be free'd.

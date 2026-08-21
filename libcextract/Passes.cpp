@@ -535,11 +535,17 @@ class FunctionExternalizerPass : public Pass
                                       ctx->HeadersToExpand,
                                       ctx->HeadersToNotExpand,
                                       ctx->DumpPasses);
+
+      std::vector<std::string> to_externalize(ctx->Externalize);
+
+      /* Remove any element in to_externalize that is in NotExternalize.  */
+      Remove_Elements_Present_In_2nd_Vector(to_externalize, ctx->NotExternalize);
+
       if (ctx->RenameSymbols)
         /* The FuncExtractNames will be modified, as the function will be renamed.  */
-        externalizer.Externalize_Symbols(ctx->Externalize, ctx->FuncExtractNames);
+        externalizer.Externalize_Symbols(to_externalize, ctx->FuncExtractNames);
       else
-        externalizer.Externalize_Symbols(ctx->Externalize);
+        externalizer.Externalize_Symbols(to_externalize);
 
       externalizer.Commit_Changes_To_Source(ctx->OFS, ctx->MFS, ctx->HeadersToExpand);
 

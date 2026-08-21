@@ -54,6 +54,11 @@ class ArgvParser
     return SymbolsToExternalize;
   }
 
+  inline std::vector<std::string>& Get_Symbols_To_Not_Externalize(void)
+  {
+    return SymbolsToNotExternalize;
+  }
+
   inline std::vector<std::string>& Get_Headers_To_Expand(void)
   {
     return HeadersToExpand;
@@ -155,6 +160,7 @@ class ArgvParser
 
   std::vector<std::string> FunctionsToExtract;
   std::vector<std::string> SymbolsToExternalize;
+  std::vector<std::string> SymbolsToNotExternalize;
   std::vector<std::string> HeadersToExpand;
   std::vector<std::string> HeadersToNotExpand;
   std::string OutputFile;
