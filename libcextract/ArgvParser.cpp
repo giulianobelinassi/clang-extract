@@ -142,6 +142,7 @@ void ArgvParser::Insert_Required_Parameters(void)
     "-Wno-duplicate-decl-specifier", // Disabled due to kernel issues. See more
                                      // at https://github.com/ClangBuiltLinux/linux/issues/2013
                                      // and https://github.com/llvm/llvm-project/issues/93449
+    "-Wno-unused-command-line-argument" // Disable warnings stating that '-c' is ignored.
   };
 
   for (const char *arg : priv_args) {
