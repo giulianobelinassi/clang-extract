@@ -230,6 +230,33 @@ bool DeclClosureVisitor::VisitRecordDecl(RecordDecl *decl)
   TRY_TO(ParentRecordDeclHelper(decl));
 
   Closure.Add_Single_Decl(decl);
+
+
+  /* In case our RecordDecl was triggered to be in the closure, then also
+     analyse the types of any FieldDecl it contains. For example:
+
+      struct quic_channel_st {
+          SSL *tls;
+          BIO_ADDR cur_peer_addr;
+      };
+
+     if we are here because we accessed `tls` attribute of this struct, we also
+     need to make sure BIO_ADDR is also included in the closure, otherwise we
+     can't know the size of quic_channel_st even if nothing accesses it.  See
+     closure-7.c testcase for a case where this happens.
+
+     For some reason, sometimes the struct definition found by clang AST
+     visitor when comming from an TypedefType isn't the full definition of the
+     struct when we need it!  In this case, lets make sure we also process the
+     declaration that have the definition.  */
+  if (!decl->isCompleteDefinition()) {
+    RecordDecl *complete = decl->getDefinition();
+    if (complete != nullptr && complete != decl &&
+        complete->isCompleteDefinitionRequired()) {
+      TRY_TO(TraverseDecl(complete));
+    }
+  }
+
   /* Also analyze the previous version of this decl for any version of it
      that is nested-declared inside another record.  */
   TRY_TO(AnalyzePreviousDecls(decl));
@@ -288,7 +315,7 @@ bool DeclClosureVisitor::VisitEnumConstantDecl(EnumConstantDecl *decl)
   return VISITOR_CONTINUE;
 }
 
-/* Not called automatically by Transverse.  */
+/* Not called automatically by Traverse.  */
 bool DeclClosureVisitor::VisitTypedefNameDecl(TypedefNameDecl *decl)
 {
   // FIXME: Do we need to analyze the previous decls?
