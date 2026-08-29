@@ -46,6 +46,9 @@ struct IpaCloneNode
 
   /** Which symbols this symbol is inline into?  */
   std::set<IpaCloneNode *> Inlines;
+
+  /** Was this clone marked as removed by IPA?  */
+  bool Removed;
 };
 
 /** @brief Parse .ipa-clone files and build an inline graph.  */

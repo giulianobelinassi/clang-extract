@@ -161,18 +161,14 @@ static int Action_Graphviz(void *s, IpaCloneNode *n1, IpaCloneNode *n2)
 
 void InlineAnalysis::Print_Node_Colors(const std::set<IpaCloneNode *> &set, FILE *fp)
 {
-  if (!Have_Debuginfo()) {
-    return;
-  }
-
   for (IpaCloneNode *node : set) {
     const char *demangled = InlineAnalysis::Demangle_Symbol(node->Name.c_str());
     std::pair<unsigned char, ElfSymtabType> infos = Get_Symbol_Info(node->Name);
     unsigned char syminfo = infos.first;
     ElfSymtabType symtab = infos.second;
-    if (syminfo == 0) {
+    if (syminfo == 0 || node->Removed) {
       fprintf(fp, "\n\"%s\" [style=dotted]", demangled);
-    } else {
+    } else if (Have_Debuginfo()) {
       //unsigned char type = ElfSymbol::Type_Of(syminfo);
       unsigned char bind = ElfSymbol::Bind_Of(syminfo);
       if (bind == STB_LOCAL) {
