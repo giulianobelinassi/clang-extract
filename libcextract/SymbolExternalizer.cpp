@@ -251,7 +251,8 @@ class ExternalizerVisitor: public RecursiveASTVisitor<ExternalizerVisitor>
 
     /* We must be careful to ensure that the reference we got is actually
        written cleanly, e.g. it doesn't come from a macro expansion.  */
-    if (sym_name == PrettyPrint::Get_Source_Text(range) && sym->Needs_Sym_Rename()) {
+    if (!SE.DoNotRenameExternaliedUses &&
+        sym_name == PrettyPrint::Get_Source_Text(range) && sym->Needs_Sym_Rename()) {
       /* Issue a text modification.  */
       SE.Replace_Text(range, sym->getUseName(), 100);
     }
@@ -791,6 +792,9 @@ SymbolExternalizer::Get_Range_Of_Identifier_In_Macro_Expansion(const MacroExpans
 
 void SymbolExternalizer::Rewrite_Macros(void)
 {
+  if (SymbolExternalizer::DoNotRenameExternaliedUses)
+    return;
+
   PreprocessingRecord *rec = AST->getPreprocessor().getPreprocessingRecord();
 
   for (PreprocessedEntity *entity : *rec) {
@@ -1020,10 +1024,19 @@ void SymbolExternalizer::Late_Externalize(void)
     std::string sym_name = sym->OldDecl->getName().str();
     outstr << ";\n";
 
+    /* In case the user allow us to hack a macro so we can link the old symbol
+       to the new one, do it here.  This allow us to avoid some problems when
+       renaming symbols.  */ 
+    if (DoNotRenameExternaliedUses)
+      outstr << "#define " << sym_name << " " <<sym->getUseName() << '\n';
+
+    SourceLocation inserted;
+
     /* In case we successfully have a late insertion location, put the new decl
        there.  */
     if (sym->LateInsertLocation.isValid()) {
       SE.Insert_Text(sym->LateInsertLocation, outstr.str());
+      inserted = sym->LateInsertLocation;
 
       /* In case the symbol is in the main file already, we must delete it.  */
       DeclaratorDecl *old_decl = Get_With_Body_Or_Itself(sym->OldDecl);
@@ -1035,11 +1048,26 @@ void SymbolExternalizer::Late_Externalize(void)
     } else {
       /* Fallback to the old method of rewriting the declaration.  */
       SE.Replace_Text(sym->OldDecl->getSourceRange(), outstr.str(), 1000);
+      inserted = sym->OldDecl->getBeginLoc();
 
       /* Emit a warning for debuging purposes for now.  */
       if (AllowLateExternalization) {
         std::string msg = "LateLocation of " + sym->OldDecl->getName().str() + " is invalid\n";
         DiagsClass::Emit_Warn(msg);
+      }
+    }
+
+    /* In case we want to not change the uses of the externalized variables,
+       then we also need to delete any other redeclaration of it that is
+       located after the insertion point of the new externalized decl.  */
+    if (SE.DoNotRenameExternaliedUses) {
+      NamedDecl *decl = sym->OldDecl->getMostRecentDecl();
+      SourceLocation loc = sm.getExpansionLoc(decl->getBeginLoc());
+
+      while (inserted < loc) {
+        SE.Remove_Text(decl->getSourceRange(), 1000);
+        decl = static_cast<NamedDecl *>(decl->getPreviousDecl());
+        loc = sm.getExpansionLoc(decl->getBeginLoc());
       }
     }
 

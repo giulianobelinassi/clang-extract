@@ -57,6 +57,7 @@ class PassManager {
             Kernel(args.Is_Kernel()),
             Ibt(args.Has_Ibt()),
             AllowLateExternalizations(args.Get_Allow_Late_Externalization()),
+            NoStrongExtRenames(args.No_Strong_Externalization_Rename()),
             PatchObject(args.Get_PatchObject()),
             HeadersToExpand(args.Get_Headers_To_Expand()),
             HeadersToNotExpand(args.Get_Headers_To_Not_Expand()),
@@ -119,6 +120,12 @@ class PassManager {
 
         /** If we can late externalize variables.  */
         bool AllowLateExternalizations;
+
+        /** If this is enabled, then SymbolExternalizer will not rename the use
+            of the symbols into explicit (*klpe_var).  Rather, uses will be
+            accessed indirectly though a macro with the same name as the
+            original symbol.  */
+        bool NoStrongExtRenames;
 
         /** Object that will be patched. */
         std::string PatchObject;

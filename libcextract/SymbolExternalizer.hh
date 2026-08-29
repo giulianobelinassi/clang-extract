@@ -301,7 +301,8 @@ class SymbolExternalizer
 {
   public:
   SymbolExternalizer(ASTUnit *ast, InlineAnalysis &ia, bool ibt,
-                     bool allow_late_externalize, std::string patch_object,
+                     bool allow_late_externalize, bool do_not_rename_ext_uses,
+                     std::string patch_object,
                      const std::vector<std::string> &functions_to_extract,
                      IncludeExpansionPolicy::Policy exp_policy,
                      std::vector<std::string> const &must_expand,
@@ -313,6 +314,7 @@ class SymbolExternalizer
       IA(ia),
       Ibt(ibt),
       AllowLateExternalization(allow_late_externalize),
+      DoNotRenameExternaliedUses(do_not_rename_ext_uses),
       PatchObject(patch_object),
       SymbolsMap({}),
       ClosureVisitor(ast),
@@ -433,6 +435,10 @@ class SymbolExternalizer
 
   /* True if we can write the externalized decl later than the original symbol.  */
   bool AllowLateExternalization;
+
+  /* True if we don't need that externalization symbols be renamed on their
+     uses.  */
+  bool DoNotRenameExternaliedUses;
 
   /* Name of the object that will be patched. */
   std::string PatchObject;

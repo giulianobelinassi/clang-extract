@@ -532,6 +532,7 @@ class FunctionExternalizerPass : public Pass
       /* Issue externalization.  */
       SymbolExternalizer externalizer(ctx->AST.get(), ctx->IA, ctx->Ibt,
                                       ctx->AllowLateExternalizations,
+                                      ctx->NoStrongExtRenames,
                                       ctx->PatchObject,
                                       ctx->FuncExtractNames,
                                       ctx->IncExpansionPolicy,

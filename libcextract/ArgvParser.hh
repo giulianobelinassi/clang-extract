@@ -144,6 +144,11 @@ class ArgvParser
     return AllowLateExternalization;
   }
 
+  inline bool No_Strong_Externalization_Rename(void)
+  {
+    return NoStrongExtRenames;
+  }
+
   inline bool Get_Ignore_Clang_Errors(void)
   {
     return IgnoreClangErrors;
@@ -177,6 +182,7 @@ class ArgvParser
   /* If set, then clang-extract may write the externalized decl later than the
      original code.  */
   bool AllowLateExternalization;
+  bool NoStrongExtRenames;
   std::string PatchObject;
 
   std::vector<std::string> Debuginfos;

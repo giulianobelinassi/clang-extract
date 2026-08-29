@@ -74,6 +74,7 @@ ArgvParser::ArgvParser(int argc, char **argv)
     Kernel(false),
     Ibt(false),
     AllowLateExternalization(false),
+    NoStrongExtRenames(false),
     PatchObject(""),
     Debuginfos(),
     IpaclonesPath(nullptr),
@@ -197,6 +198,11 @@ void ArgvParser::Print_Usage_Message(void)
 "  -DCE_LATE_EXTERNALIZE    Enable late externalization (declare externalized variables\n"
 "                           later than the original).  May reduce code output when\n"
 "                           -DCE_KEEP_INCLUDES is enabled\n"
+"  -DCE_NO_STRONG_EXT_RENAME\n"
+"                           Do not rename the uses of strong externalized variables\n"
+"                           Avoid problems when the variable is referenced by obscure\n"
+"                           macro expansions.  May also reduce code when\n"
+"                           -DCE_KEEP_INCLUDES is passed.\n"
 "  -DCE_IGNORE_CLANG_ERRORS Ignore clang compilation errors in a hope that code is\n"
 "                           generated even if it won't compile.\n"
 "\n";
@@ -325,6 +331,11 @@ bool ArgvParser::Handle_Clang_Extract_Arg(const char *str)
   }
   if (!strcmp("-DCE_IGNORE_CLANG_ERRORS", str)) {
     IgnoreClangErrors = true;
+
+    return true;
+  }
+  if (!strcmp("-DCE_NO_STRONG_EXT_RENAME", str)) {
+    NoStrongExtRenames = true;
 
     return true;
   }
