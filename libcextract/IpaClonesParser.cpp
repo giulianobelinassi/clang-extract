@@ -161,6 +161,7 @@ IpaCloneNode *IpaClones::Get_Or_Create_Node(const std::string &name)
   /* Not found.  Create it.  */
   IpaCloneNode node;
   node.Name = name;
+  node.Removed = false;
   Nodes[name] = node;
 
   return &Nodes[name];
@@ -271,6 +272,9 @@ void IpaClones::Parse(const char *path)
         callee->InlinedInto.insert(caller);
         caller->Inlines.insert(callee);
       }
+    } else if (decision == IPA_REMOVE) {
+      IpaCloneNode *clone = Get_Or_Create_Node(original_asm_name);
+      clone->Removed = true;
     }
   }
   fclose(file);
@@ -300,11 +304,21 @@ void IpaClones::Dump_Graphviz(const char *filename)
   }
 
   fprintf(file, "strict digraph {");
+
   for (auto &p : Nodes) {
     for (auto &q : p.second.InlinedInto) {
       fprintf(file, "\n\"%s\" -> \"%s\"", p.first.c_str(), q->Name.c_str());
     }
   }
+
+  /* Dot the nodes that we know are removed.  */
+  for (auto &p : Nodes) {
+    IpaCloneNode *node = &p.second;
+    if (node->Removed) {
+      fprintf(file, "\n\"%s\" [style=dotted]", p.first.c_str());
+    }
+  }
+
   fprintf(file, "\n}");
   fclose(file);
 }
