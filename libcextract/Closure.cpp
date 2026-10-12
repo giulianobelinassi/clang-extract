@@ -30,6 +30,7 @@ bool ClosureSet::Add_Decl_And_Prevs(Decl *decl)
   while (decl) {
     if (!Is_Decl_Marked(decl)) {
       Dependencies.insert(decl);
+      Add_Enclosing_Contexts(decl);
       inserted = true;
     }
 
@@ -100,16 +101,24 @@ bool DeclClosureVisitor::VisitFunctionDecl(FunctionDecl *decl)
     return VISITOR_CONTINUE;
   }
 
+  /* In case this is an implicit instantiation of a template, then we need
+     the function it was instantiated from, which is what is written in the
+     source code.  */
+  if (isTemplateInstantiation(decl->getTemplateSpecializationKind())) {
+    TRY_TO(TraverseDecl(decl->getTemplateInstantiationPattern()));
+  }
+
   /* If this function is actually a template function specialization, then
      look into it.  */
   if (FunctionTemplateSpecializationInfo *ftsi =
               decl->getTemplateSpecializationInfo()) {
-    TRY_TO(VisitFunctionTemplateDecl(ftsi->getTemplate()));
+    TRY_TO(TraverseDecl(ftsi->getTemplate()));
   }
 
-  /* Mark function for output.  */
+  /* Mark function for output.  Functions inside of templates must have its
+     definition visible in order to be instantiated.  */
   FunctionDecl *to_mark = decl;
-  if (decl->isStatic()) {
+  if (decl->isStatic() || decl->isTemplated()) {
     FunctionDecl *definition = decl->getDefinition();
     /* FIXME: Declared static function in closure without a body?  */
     if (definition != nullptr) {
@@ -329,6 +338,24 @@ bool DeclClosureVisitor::VisitTypedefNameDecl(TypedefNameDecl *decl)
 
 bool DeclClosureVisitor::VisitVarDecl(VarDecl *decl)
 {
+  /* In case this is an instantiation of a variable template or of a static
+     member of a class template, then we need the template rather than the
+     instantiation, which is not written anywhere.  */
+  if (isTemplateInstantiation(decl->getTemplateSpecializationKind())) {
+    if (VarTemplateSpecializationDecl *vtsd =
+        dyn_cast<VarTemplateSpecializationDecl>(decl)) {
+      auto specialized = vtsd->getSpecializedTemplateOrPartial();
+      if (auto partial = specialized.dyn_cast<VarTemplatePartialSpecializationDecl *>()) {
+        TRY_TO(TraverseDecl(partial));
+      }
+      return TraverseDecl(vtsd->getSpecializedTemplate());
+    }
+
+    if (VarDecl *pattern = decl->getInstantiatedFromStaticDataMember()) {
+      return TraverseDecl(pattern);
+    }
+  }
+
   /* Avoid adding variables that are not global.  */
   // FIXME: Do we need to analyze every previous decl?
   if (decl->hasGlobalStorage()) {
@@ -341,6 +368,12 @@ bool DeclClosureVisitor::VisitVarDecl(VarDecl *decl)
 bool DeclClosureVisitor::VisitFunctionTemplateDecl(FunctionTemplateDecl *decl)
 {
   Closure.Add_Decl_And_Prevs(decl);
+
+  /* The template may have been forward declared and defined later.  We need
+     the definition in order to instantiate it.  */
+  if (FunctionDecl *def = decl->getTemplatedDecl()->getDefinition()) {
+    TRY_TO(TraverseDecl(def->getDescribedFunctionTemplate()));
+  }
 
   return VISITOR_CONTINUE;
 }
@@ -361,6 +394,25 @@ bool DeclClosureVisitor::VisitNamespaceDecl(NamespaceDecl *decl)
 
 bool DeclClosureVisitor::VisitCXXRecordDecl(CXXRecordDecl *decl)
 {
+  /* Records inside of templates (e.g. out-of-line definitions of nested
+     classes) are needed in full to instantiate the template.  */
+  if (decl->isDependentContext()) {
+    decl->setCompleteDefinitionRequired(true);
+    if (CXXRecordDecl *def = decl->getDefinition()) {
+      def->setCompleteDefinitionRequired(true);
+    }
+  }
+
+  /* In case this is an instantiation of a member class of a class template,
+     we need the class it was instantiated from.  */
+  if (decl->getTemplateSpecializationKind() == TSK_ImplicitInstantiation &&
+      !isa<ClassTemplateSpecializationDecl>(decl)) {
+    if (CXXRecordDecl *pattern = decl->getTemplateInstantiationPattern()) {
+      pattern->setCompleteDefinitionRequired(true);
+      TRY_TO(TraverseDecl(pattern));
+    }
+  }
+
   /* In case this is a ClassTemplateSpecialDecl, then analyze it as such.  */
   if (ClassTemplateSpecializationDecl *ctsd =
       dyn_cast<ClassTemplateSpecializationDecl>(decl)) {
@@ -375,6 +427,32 @@ bool DeclClosureVisitor::VisitCXXRecordDecl(CXXRecordDecl *decl)
 bool DeclClosureVisitor::VisitClassTemplateDecl(ClassTemplateDecl *decl)
 {
   Closure.Add_Decl_And_Prevs(decl);
+
+  /* The template may have been forward declared and defined later.  We need
+     the definition in order to instantiate it.  */
+  if (CXXRecordDecl *def = decl->getTemplatedDecl()->getDefinition()) {
+    def->setCompleteDefinitionRequired(true);
+    TRY_TO(TraverseDecl(def->getDescribedClassTemplate()));
+  }
+
+  /* Any of the partial specializations may be selected by an instantiation of
+     this template, so add them as well.  */
+  SmallVector<ClassTemplatePartialSpecializationDecl *, 4> partials;
+  decl->getPartialSpecializations(partials);
+  for (ClassTemplatePartialSpecializationDecl *partial : partials) {
+    /* clang doesn't mark those as requiring a complete definition.  */
+    partial->setCompleteDefinitionRequired(true);
+    TRY_TO(TraverseDecl(partial));
+  }
+
+  /* The same goes for explicit specializations, which may be selected in a
+     way we can't track, e.g. by SFINAE.  */
+  for (ClassTemplateSpecializationDecl *spec : decl->specializations()) {
+    if (spec->getSpecializationKind() == TSK_ExplicitSpecialization) {
+      spec->setCompleteDefinitionRequired(true);
+      TRY_TO(TraverseDecl(spec));
+    }
+  }
 
   return VISITOR_CONTINUE;
 }
@@ -393,8 +471,42 @@ bool DeclClosureVisitor::VisitClassTemplateSpecializationDecl(
   This call will add the A to the closure.  */
   TRY_TO(TraverseTemplateArguments(decl->getTemplateArgs().asArray()));
 
-  /* This call will add the V to the closure.  */
-  return VisitClassTemplateDecl(decl->getSpecializedTemplate());
+  /* In case this specializes a partial specialization, we also need it.  */
+  auto specialized = decl->getSpecializedTemplateOrPartial();
+  if (auto partial = specialized.dyn_cast<ClassTemplatePartialSpecializationDecl *>()) {
+    partial->setCompleteDefinitionRequired(true);
+    TRY_TO(TraverseDecl(partial));
+  }
+
+  /* This call will add the V to the closure.  Traverse it so that the
+     dependencies of the template pattern are also added.  */
+  return TraverseDecl(decl->getSpecializedTemplate());
+}
+
+bool DeclClosureVisitor::VisitUsingDecl(UsingDecl *decl)
+{
+  Closure.Add_Single_Decl(decl);
+
+  return VISITOR_CONTINUE;
+}
+
+bool DeclClosureVisitor::VisitUsingShadowDecl(UsingShadowDecl *decl)
+{
+  /* Assume
+    namespace std {
+      using ::mbstate_t;
+    }
+
+    std::mbstate_t x;
+  The reference to `std::mbstate_t` points to the UsingShadowDecl, so we
+  need both the `using` declaration and the original declaration.
+
+  Not called automatically by Traverse because UsingShadowDecls are
+  implicit.  */
+  TRY_TO(TraverseDecl(decl->getIntroducer()));
+  TRY_TO(TraverseDecl(decl->getTargetDecl()));
+
+  return VISITOR_CONTINUE;
 }
 
 /* ----------- Statements -------------- */
@@ -417,15 +529,50 @@ bool DeclClosureVisitor::VisitMemberExpr(MemberExpr *expr)
     return TraverseDecl(record);
   }
 
+  /* For C++ the member can also be a method, which may be defined outside of
+     the class.  */
+  if (CXXMethodDecl *method = dyn_cast<CXXMethodDecl>(expr->getMemberDecl())) {
+    return TraverseDecl(method);
+  }
+
   return VISITOR_CONTINUE;
 }
 
 bool DeclClosureVisitor::VisitDeclRefExpr(DeclRefExpr *expr)
 {
   TRY_TO(TraverseDecl(expr->getDecl()));
+  /* For C++ we also need to analyze the name specifier.  */
+#if CLANG_VERSION_MAJOR >= 22
+  TRY_TO(TraverseNestedNameSpecifier(expr->getQualifier()));
+#else
+  if (NestedNameSpecifier *nns = expr->getQualifier()) {
+    TRY_TO(TraverseNestedNameSpecifier(nns));
+  }
+#endif
+
+  /* In case the decl was found through a `using` declaration, we also need
+     to analyze it.  */
+  if (UsingShadowDecl *shadow = dyn_cast<UsingShadowDecl>(expr->getFoundDecl())) {
+    TRY_TO(VisitUsingShadowDecl(shadow));
+  }
 
   /* Analyze the decl it references to.  */
   return TraverseDecl(expr->getDecl());
+}
+
+bool DeclClosureVisitor::VisitOverloadExpr(OverloadExpr *expr)
+{
+  /* In a dependent context we do not know which declaration will be selected,
+     so analyze all candidates.  */
+  for (NamedDecl *decl : expr->decls()) {
+    if (UsingShadowDecl *shadow = dyn_cast<UsingShadowDecl>(decl)) {
+      TRY_TO(VisitUsingShadowDecl(shadow));
+    } else {
+      TRY_TO(TraverseDecl(decl));
+    }
+  }
+
+  return VISITOR_CONTINUE;
 }
 
 bool DeclClosureVisitor::VisitOffsetOfExpr(OffsetOfExpr *expr)
@@ -499,6 +646,17 @@ bool DeclClosureVisitor::VisitTypedefType(const TypedefType *type)
   return VISITOR_CONTINUE;
 }
 
+bool DeclClosureVisitor::VisitUsingType(const UsingType *type)
+{
+  /* UsingShadowDecls are implicit, so TraverseDecl would ignore them.  */
+#if CLANG_VERSION_MAJOR >= 22
+  TRY_TO(VisitUsingShadowDecl(type->getDecl()));
+#else
+  TRY_TO(VisitUsingShadowDecl(type->getFoundDecl()));
+#endif
+  return VISITOR_CONTINUE;
+}
+
 /* -------- C++ Types ------------- */
 
 bool DeclClosureVisitor::VisitTemplateSpecializationType(
@@ -506,7 +664,11 @@ bool DeclClosureVisitor::VisitTemplateSpecializationType(
 {
   /* For some reason the Traverse do not run on the original template
      C++ Record, only on its specializations.  Hence do it here.  */
-  return TraverseDecl(type->getAsCXXRecordDecl());
+  TRY_TO(TraverseDecl(type->getAsCXXRecordDecl()));
+
+  /* In case the type is dependent there is no specialization to look into,
+     so get the template from its name.  */
+  return TraverseDecl(type->getTemplateName().getAsTemplateDecl());
 }
 
 bool DeclClosureVisitor::VisitDeducedTemplateSpecializationType(
@@ -517,6 +679,56 @@ bool DeclClosureVisitor::VisitDeducedTemplateSpecializationType(
 }
 
 /* ----------- Other C++ stuff ----------- */
+
+#if CLANG_VERSION_MAJOR >= 22
+bool DeclClosureVisitor::TraverseNestedNameSpecifier(NestedNameSpecifier nns)
+{
+  switch (nns.getKind()) {
+    case NestedNameSpecifier::Kind::Namespace: {
+      NamespaceBaseDecl *base =
+        const_cast<NamespaceBaseDecl *>(nns.getAsNamespaceAndPrefix().Namespace);
+      if (NamespaceDecl *nm = dyn_cast<NamespaceDecl>(base)) {
+        /* Do not traverse to avoid adding unecessary childs.  */
+        TRY_TO(VisitNamespaceDecl(nm));
+      } else {
+        TRY_TO(TraverseDecl(base));
+      }
+      break;
+    }
+
+    case NestedNameSpecifier::Kind::MicrosoftSuper:
+      /* Something regarding MSVC, but lets put this here.  */
+      TRY_TO(TraverseDecl(nns.getAsMicrosoftSuper()));
+      break;
+
+    default:
+      break;
+  }
+  return RecursiveASTVisitor::TraverseNestedNameSpecifier(nns);
+}
+#else
+bool DeclClosureVisitor::TraverseNestedNameSpecifier(NestedNameSpecifier *nns)
+{
+  switch (nns->getKind()) {
+    case NestedNameSpecifier::Namespace:
+      /* Do not traverse to avoid adding unecessary childs.  */
+      TRY_TO(VisitNamespaceDecl(nns->getAsNamespace()));
+      break;
+    case NestedNameSpecifier::NamespaceAlias:
+      TRY_TO(TraverseDecl(nns->getAsNamespaceAlias()));
+      break;
+
+    case NestedNameSpecifier::Super:
+      /* Something regarding MSVC, but lets put this here.  */
+      TRY_TO(TraverseDecl(nns->getAsRecordDecl()));
+      break;
+
+    default:
+      break;
+  }
+  return RecursiveASTVisitor::TraverseNestedNameSpecifier(nns);
+}
+#endif
 
 bool DeclClosureVisitor::TraverseCXXBaseSpecifier(const CXXBaseSpecifier base)
 {

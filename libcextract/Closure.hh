@@ -19,6 +19,7 @@
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Sema/IdentifierResolver.h>
 #include <clang/AST/RecursiveASTVisitor.h>
+#include <clang/Basic/Version.h>
 #include <unordered_set>
 
 #include "LLVMMisc.hh"
@@ -45,7 +46,21 @@ class ClosureSet
     }
 
     Dependencies.insert(decl);
+    Add_Enclosing_Contexts(decl);
     return true;
+  }
+
+  /** Mark the namespaces and `extern "C"` blocks which lexically encloses
+      decl, otherwise decl will not be output.  */
+  void Add_Enclosing_Contexts(Decl *decl)
+  {
+    DeclContext *ctx = decl->getLexicalDeclContext();
+    while (ctx) {
+      if (isa<NamespaceDecl>(ctx) || isa<LinkageSpecDecl>(ctx)) {
+        Dependencies.insert(cast<Decl>(ctx));
+      }
+      ctx = ctx->getLexicalParent();
+    }
   }
 
   inline std::unordered_set<Decl *> &Get_Set(void)
@@ -212,11 +227,18 @@ class DeclClosureVisitor : public RecursiveASTVisitor<DeclClosureVisitor>
 
   bool VisitClassTemplateSpecializationDecl(ClassTemplateSpecializationDecl *decl);
 
+  bool VisitUsingDecl(UsingDecl *decl);
+
+  /* Not called automatically by Traverse.  */
+  bool VisitUsingShadowDecl(UsingShadowDecl *decl);
+
   /* ----------- Statements -------------- */
 
   bool VisitMemberExpr(MemberExpr *expr);
 
   bool VisitDeclRefExpr(DeclRefExpr *expr);
+
+  bool VisitOverloadExpr(OverloadExpr *expr);
 
   bool VisitOffsetOfExpr(OffsetOfExpr *expr);
 
@@ -232,6 +254,8 @@ class DeclClosureVisitor : public RecursiveASTVisitor<DeclClosureVisitor>
 
   bool VisitTypedefType(const TypedefType *type);
 
+  bool VisitUsingType(const UsingType *type);
+
   /* -------- C++ Types ------------- */
   bool VisitTemplateSpecializationType(const TemplateSpecializationType *type);
 
@@ -239,6 +263,12 @@ class DeclClosureVisitor : public RecursiveASTVisitor<DeclClosureVisitor>
       const DeducedTemplateSpecializationType *type);
 
   /* ----------- Other C++ stuff ----------- */
+#if CLANG_VERSION_MAJOR >= 22
+  bool TraverseNestedNameSpecifier(NestedNameSpecifier nns);
+#else
+  bool TraverseNestedNameSpecifier(NestedNameSpecifier *nns);
+#endif
+
   bool TraverseCXXBaseSpecifier(const CXXBaseSpecifier base);
 
   /* ------ Helper Functions ------ */

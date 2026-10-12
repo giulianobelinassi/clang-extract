@@ -230,7 +230,9 @@ void FunctionDependencyFinder::Remove_Redundant_Decls(void)
   for (it = AST->top_level_begin(); it != AST->top_level_end(); ++it) {
     Decl *decl = *it;
     if (isa<TypedefDecl>(decl) || isa<DeclaratorDecl>(decl) || isa<TagDecl>(decl)) {
-      if (!closure.Is_Decl_Marked(decl))
+      /* Template instantiations have the same range of the template they
+         come from, but they are not printed.  */
+      if (!closure.Is_Decl_Marked(decl) || Is_Template_Instantiation(decl))
         continue;
 
       // Set prev and exit, since we don't have anything to compare agains't

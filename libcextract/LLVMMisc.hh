@@ -44,6 +44,10 @@ using namespace clang;
 /** Check if Decl is a builtin.  */
 bool Is_Builtin_Decl(const Decl *decl);
 
+/** Check if Decl is an instantiation of a template which is not written in
+    the source code, but rather the template it comes from.  */
+bool Is_Template_Instantiation(const Decl *decl);
+
 /** Build CallGraph from AST.
  *
  * The CallGraph is a datastructure in which nodes are functions and edges

@@ -190,6 +190,13 @@ class RecursivePrint
   /** Print single decl.  */
   void Print_Decl(Decl *decl);
 
+  /** Print the children of a namespace or `extern "C"` block, together with
+      the macros defined in it.  */
+  void Print_Decl_Context(Decl *decl, DeclContext *ctx);
+
+  /** Print the preprocessed entities (e.g. macros) located in range.  */
+  void Print_Preprocessed_In_Range(SourceLocation begin, SourceLocation end);
+
   /** Print a Macro Defintion into ostream `Out`.  */
   void Print_Macro(MacroDefinitionRecord *rec);
 

@@ -77,8 +77,13 @@ void PrettyPrint::Print_Decl(Decl *decl, bool keep_includes)
         FIXME:  regexes are slow.  */
     static llvm::Regex regex("# *include *(<|\")");
 
-    /* FIXME: Why isCompleteDefinitionRequired does not work for EnumDecls?  */
-    if (t && ((!e && t->isCompleteDefinitionRequired() == false)
+    /* FIXME: Why isCompleteDefinitionRequired does not work for EnumDecls?
+       Also, out-of-line definitions of nested classes such as
+       `class A::B { ... };` can't be turned into a forward declaration.  */
+    bool can_remove_def = t && !e && t->isCompleteDefinitionRequired() == false
+                          && !t->isOutOfLine();
+
+    if (t && (can_remove_def
               || (!keep_includes && regex.match(Get_Source_Text(t->getSourceRange()))))) {
 
       /* FIXME: The Print_Decl_Raw class will attempt to write this declaration
@@ -94,8 +99,7 @@ void PrettyPrint::Print_Decl(Decl *decl, bool keep_includes)
     /** Check if we can get a partial declaration of `decl` rather than a full
         declaration.  */
     bool full_def_removed = false;
-    /* FIXME: Why isCompleteDefinitionRequired does not work for EnumDecls?  */
-    if (t && !e && t->isCompleteDefinitionRequired() == false) {
+    if (can_remove_def) {
       /* We don't need the full defintion.  Hide the body for Print_Decl_Raw.  */
       t->setCompleteDefinition(false);
       full_def_removed = true;
@@ -133,9 +137,42 @@ bool Has_NoInline_Attr(Decl *decl)
   return false;
 }
 
+/** Get the source range of decl, including the template parameter lists of
+    the enclosing classes in out-of-line definitions of member templates:
+
+    template<typename T>
+      template<typename U>
+        void A<T>::f(U) {}
+
+    The range of the FunctionTemplateDecl would start at `template<typename U>`
+    otherwise.  */
+static SourceRange Get_Range_With_Outer_Template_Params(Decl *decl)
+{
+  SourceRange range = decl->getSourceRange();
+
+  if (TemplateDecl *tdecl = dyn_cast<TemplateDecl>(decl)) {
+    NamedDecl *templated = tdecl->getTemplatedDecl();
+    SourceLocation outer;
+
+    /* getOuterLocStart returns the location of the outermost template
+       parameter list, if there is any.  */
+    if (DeclaratorDecl *ddecl = dyn_cast_or_null<DeclaratorDecl>(templated)) {
+      outer = ddecl->getOuterLocStart();
+    } else if (TagDecl *tag = dyn_cast_or_null<TagDecl>(templated)) {
+      outer = tag->getOuterLocStart();
+    }
+
+    if (outer.isValid() && PrettyPrint::Is_Before(outer, range.getBegin())) {
+      range.setBegin(outer);
+    }
+  }
+
+  return range;
+}
+
 void PrettyPrint::Print_Decl_Raw(Decl *decl)
 {
-  SourceRange decl_range = decl->getSourceRange();
+  SourceRange decl_range = Get_Range_With_Outer_Template_Params(decl);
 
   /* If a SourceManager was specified and the decl source range seems valid,
      then output based on the original source code.  */
@@ -459,6 +496,17 @@ SourceLocation PrettyPrint::Get_Expanded_Loc(Decl *decl)
       }
     }
 
+#if CLANG_VERSION_MAJOR >= 17
+    /* The range of explicitly defaulted functions doesn't include the
+       `= default`, which is required for out-of-line definitions.  */
+    if (FunctionDecl *fdecl = dyn_cast<FunctionDecl>(decl)) {
+      SourceLocation loc = SM.getExpansionLoc(fdecl->getDefaultLoc());
+      if (loc.isValid() && Is_Before(furthest, loc)) {
+        furthest = loc;
+      }
+    }
+#endif
+
     /* Find the last ';' token, once there are attributes right after the last
        '}'.  On __attribute__((unused)), the previous code reach until
        __attribute__((unused), ignoring the last parenthesis. On macros, like
@@ -673,9 +721,59 @@ void RecursivePrint::Print_Preprocessed(PreprocessedEntity *prep)
   }
 }
 
+void RecursivePrint::Print_Preprocessed_In_Range(SourceLocation begin,
+                                                 SourceLocation end)
+{
+  if (!PrettyPrint::Is_Before(begin, end)) {
+    return;
+  }
+
+  PreprocessingRecord *rec = AST->getPreprocessor().getPreprocessingRecord();
+  for (PreprocessedEntity *prep : rec->getPreprocessedEntitiesInRange({begin, end})) {
+    Print_Preprocessed(prep);
+  }
+}
+
+void RecursivePrint::Print_Decl_Context(Decl *decl, DeclContext *ctx)
+{
+  SourceManager &sm = AST->getSourceManager();
+
+  /* The TopLevelASTIterator skips everything inside of this decl, so we must
+     print the macros that are defined in between the children.  */
+  SourceLocation last = sm.getExpansionLoc(decl->getBeginLoc());
+  for (Decl *child : ctx->decls()) {
+    /* Template instantiations are out of order and are not printed.  */
+    if (Is_Template_Instantiation(child)) {
+      continue;
+    }
+
+    SourceLocation child_begin = sm.getExpansionLoc(child->getBeginLoc());
+    SourceLocation child_end = sm.getExpansionLoc(child->getEndLoc());
+
+    Print_Preprocessed_In_Range(last, child_begin);
+    Print_Decl(child);
+
+    if (PrettyPrint::Is_Before(last, child_end)) {
+      last = child_end;
+    }
+  }
+  Print_Preprocessed_In_Range(last, sm.getExpansionLoc(decl->getEndLoc()));
+}
+
 void RecursivePrint::Print_Decl(Decl *decl)
 {
+  if (Is_Template_Instantiation(decl)) {
+    return;
+  }
+
   if (!Is_Decl_Marked(decl)) {
+    /* Even if nothing in a namespace or `extern "C"` block is needed, there
+       may be macros defined in it that are.  */
+    if (isa<NamespaceDecl>(decl) || isa<LinkageSpecDecl>(decl)) {
+      SourceManager &sm = AST->getSourceManager();
+      Print_Preprocessed_In_Range(sm.getExpansionLoc(decl->getBeginLoc()),
+                                  sm.getExpansionLoc(decl->getEndLoc()));
+    }
     return;
   }
 
@@ -689,11 +787,26 @@ void RecursivePrint::Print_Decl(Decl *decl)
 
     (*PrettyPrint::Out) <<"namespace " << namespacedecl->getName() << " {\n  ";
 
-    /* Iterate on each macro.  */
-    for (auto child : namespacedecl->decls()) {
-      Print_Decl(child);
-    }
+    Print_Decl_Context(namespacedecl, namespacedecl);
     (*PrettyPrint::Out) << "}\n";
+  } else if (LinkageSpecDecl *linkagedecl = dyn_cast<LinkageSpecDecl>(decl)) {
+    /* Handle `extern "C"` blocks the same way as namespaces.  */
+#if CLANG_VERSION_MAJOR >= 17
+    bool is_c = linkagedecl->getLanguage() == LinkageSpecLanguageIDs::C;
+#else
+    bool is_c = linkagedecl->getLanguage() == LinkageSpecDecl::lang_c;
+#endif
+    (*PrettyPrint::Out) << "extern \"" << (is_c ? "C" : "C++") << "\" ";
+
+    /* `extern "C" int x;` is a declaration while `extern "C" { int x; }` is
+       a definition, so do not add braces if there weren't any.  */
+    if (linkagedecl->hasBraces()) {
+      (*PrettyPrint::Out) << "{\n";
+    }
+    Print_Decl_Context(linkagedecl, linkagedecl);
+    if (linkagedecl->hasBraces()) {
+      (*PrettyPrint::Out) << "}\n";
+    }
   } else {
     Print_CE_Comment(decl);
     PrettyPrint::Print_Decl(decl, KeepIncludes);

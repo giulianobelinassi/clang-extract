@@ -1,7 +1,4 @@
 /* { dg-options "-DCE_EXTRACT_FUNCTIONS=main -DCE_NO_EXTERNALIZATION" }*/
-/* { dg-xfail }*/
-
-// C++ default headers are currently not working.
 
 #include <iostream>
 

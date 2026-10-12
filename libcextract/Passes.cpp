@@ -493,6 +493,44 @@ class ClosurePass : public Pass
              ctx->FuncExtractNames.size() > 0;
     }
 
+    /** The output is parsed with only the in-memory filesystem, hence any
+        `__has_include` that was kept in the output (e.g. inside a function
+        body) would evaluate to false.  Add an empty file for every header
+        that it can find so that it gets the same result as before.  */
+    void Add_Has_Include_Placeholders(PassManager::Context *ctx)
+    {
+      static llvm::Regex regex("__has_include(_next)? *\\( *([<\"])([^>\"]+)[>\"] *\\)");
+
+      SourceManager &sm = ctx->AST->getSourceManager();
+      HeaderSearch &incsrch = ctx->AST->getPreprocessor().getHeaderSearchInfo();
+      auto main_dir = ClangCompat::Get_Main_Directory_Arr(sm);
+      SourceLocation mainfileloc = sm.getLocForStartOfFile(sm.getMainFileID());
+
+      StringRef code = ctx->CodeOutput;
+      SmallVector<StringRef, 4> matches;
+      while (regex.match(code, &matches)) {
+        bool angled = matches[2] == "<";
+        OptionalFileEntryRef ref = incsrch.LookupFile(matches[3],
+                                                      mainfileloc,
+                                                      angled,
+                                                      nullptr,
+                                                      nullptr,
+                                                      main_dir,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr,
+                                                      nullptr);
+        if (ref.has_value()) {
+          ctx->MFS->addFile(ref->getName(), 0, MemoryBuffer::getMemBuffer(""));
+        }
+
+        /* Continue searching after this match.  */
+        code = code.substr(matches[0].data() - code.data() + matches[0].size());
+      }
+    }
+
     virtual PassRetType Run_Pass(PassManager::Context *ctx)
     {
       ctx->CodeOutput = std::string();
@@ -522,6 +560,7 @@ class ClosurePass : public Pass
           return PASS_ERROR;
         }
       } else {
+        Add_Has_Include_Placeholders(ctx);
         if (!Build_ASTUnit(ctx, ctx->MFS)) {
           return PASS_ERROR;
         }

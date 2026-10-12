@@ -14,6 +14,7 @@
 /* Author: Giuliano Belinassi  */
 
 #include "TopLevelASTIterator.hh"
+#include "LLVMMisc.hh"
 
 TopLevelASTIterator::TopLevelASTIterator(ASTUnit *ast, bool skip_macros_in_decls)
   : AST(ast),
@@ -117,6 +118,13 @@ bool TopLevelASTIterator::Advance(void)
   SourceLocation end_of_last_decl = EndLocOfLastDecl;
 
   do {
+    /* clang reports some template instantiations as toplevel decls
+       once they are instantiated, so they are out of order.  They are not
+       written in the source code, hence skip them.  */
+    while (DeclIt != AST->top_level_end() && Is_Template_Instantiation(*DeclIt)) {
+      ++DeclIt;
+    }
+
     const SourceLocation &next_decl_loc = NEXT_DECL_IF_EXISTS(DeclIt, end);
     const SourceLocation &next_prep_loc = NEXT_PREP_IF_EXISTS(MacroIt, end);
     const SourceLocation &next_undef_loc = NEXT_UNDEF_IF_EXISTS(UndefIt, end);
