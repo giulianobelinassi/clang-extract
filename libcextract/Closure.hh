@@ -19,6 +19,7 @@
 #include <clang/Frontend/ASTUnit.h>
 #include <clang/Sema/IdentifierResolver.h>
 #include <clang/AST/RecursiveASTVisitor.h>
+#include <clang/Basic/Version.h>
 #include <unordered_set>
 
 #include "LLVMMisc.hh"
@@ -239,6 +240,12 @@ class DeclClosureVisitor : public RecursiveASTVisitor<DeclClosureVisitor>
       const DeducedTemplateSpecializationType *type);
 
   /* ----------- Other C++ stuff ----------- */
+#if CLANG_VERSION_MAJOR >= 22
+  bool TraverseNestedNameSpecifier(NestedNameSpecifier nns);
+#else
+  bool TraverseNestedNameSpecifier(NestedNameSpecifier *nns);
+#endif
+
   bool TraverseCXXBaseSpecifier(const CXXBaseSpecifier base);
 
   /* ------ Helper Functions ------ */

@@ -1,8 +1,4 @@
 /* { dg-options "-DCE_EXTRACT_FUNCTIONS=f -DCE_NO_EXTERNALIZATION" }*/
-/* { dg-xfail } */
-
-/* Test fails since LLVM-22 support.  C++ support were not working at this
-   stage, so its a regression.  */
 
 namespace A
 {

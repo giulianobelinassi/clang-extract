@@ -423,6 +423,14 @@ bool DeclClosureVisitor::VisitMemberExpr(MemberExpr *expr)
 bool DeclClosureVisitor::VisitDeclRefExpr(DeclRefExpr *expr)
 {
   TRY_TO(TraverseDecl(expr->getDecl()));
+  /* For C++ we also need to analyze the name specifier.  */
+#if CLANG_VERSION_MAJOR >= 22
+  TRY_TO(TraverseNestedNameSpecifier(expr->getQualifier()));
+#else
+  if (NestedNameSpecifier *nns = expr->getQualifier()) {
+    TRY_TO(TraverseNestedNameSpecifier(nns));
+  }
+#endif
 
   /* Analyze the decl it references to.  */
   return TraverseDecl(expr->getDecl());
@@ -517,6 +525,57 @@ bool DeclClosureVisitor::VisitDeducedTemplateSpecializationType(
 }
 
 /* ----------- Other C++ stuff ----------- */
+
+#if CLANG_VERSION_MAJOR >= 22
+bool DeclClosureVisitor::TraverseNestedNameSpecifier(NestedNameSpecifier nns)
+{
+  switch (nns.getKind()) {
+    case NestedNameSpecifier::Kind::Namespace: {
+      /* Starting from LLVM-22 both namespaces and namespace aliases are of
+         this kind.  */
+      const NamespaceBaseDecl *base = nns.getAsNamespaceAndPrefix().Namespace;
+      if (const NamespaceDecl *nm = dyn_cast<NamespaceDecl>(base)) {
+        /* Do not traverse to avoid adding unecessary childs.  */
+        TRY_TO(VisitNamespaceDecl(const_cast<NamespaceDecl *>(nm)));
+      } else {
+        TRY_TO(TraverseDecl(const_cast<NamespaceBaseDecl *>(base)));
+      }
+      break;
+    }
+
+    case NestedNameSpecifier::Kind::MicrosoftSuper:
+      /* Something regarding MSVC, but lets put this here.  */
+      TRY_TO(TraverseDecl(nns.getAsMicrosoftSuper()));
+      break;
+
+    default:
+      break;
+  }
+  return RecursiveASTVisitor::TraverseNestedNameSpecifier(nns);
+}
+#else
+bool DeclClosureVisitor::TraverseNestedNameSpecifier(NestedNameSpecifier *nns)
+{
+  switch (nns->getKind()) {
+    case NestedNameSpecifier::Namespace:
+      /* Do not traverse to avoid adding unecessary childs.  */
+      TRY_TO(VisitNamespaceDecl(nns->getAsNamespace()));
+      break;
+    case NestedNameSpecifier::NamespaceAlias:
+      TRY_TO(TraverseDecl(nns->getAsNamespaceAlias()));
+      break;
+
+    case NestedNameSpecifier::Super:
+      /* Something regarding MSVC, but lets put this here.  */
+      TRY_TO(TraverseDecl(nns->getAsRecordDecl()));
+      break;
+
+    default:
+      break;
+  }
+  return RecursiveASTVisitor::TraverseNestedNameSpecifier(nns);
+}
+#endif
 
 bool DeclClosureVisitor::TraverseCXXBaseSpecifier(const CXXBaseSpecifier base)
 {
