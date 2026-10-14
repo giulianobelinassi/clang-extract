@@ -30,6 +30,7 @@ bool ClosureSet::Add_Decl_And_Prevs(Decl *decl)
   while (decl) {
     if (!Is_Decl_Marked(decl)) {
       Dependencies.insert(decl);
+      Add_Enclosing_Decl_Contexts(decl);
       inserted = true;
     }
 

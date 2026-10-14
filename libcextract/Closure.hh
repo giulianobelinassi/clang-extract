@@ -46,7 +46,28 @@ class ClosureSet
     }
 
     Dependencies.insert(decl);
+    Add_Enclosing_Decl_Contexts(decl);
     return true;
+  }
+
+  /** Add the namespaces and `extern "C" ...` declarations that encloses decl,
+      otherwise decl would not be output, as in
+
+        extern "C" void *memcpy(void *, const void *, unsigned long);
+        namespace n { int f(void); }
+
+      where `memcpy` is inside of a LinkageSpecDecl and `f` is inside of a
+      NamespaceDecl.  Records are not handled here, as they also require
+      their complete definition to be output (see ParentRecordDeclHelper).  */
+  void Add_Enclosing_Decl_Contexts(Decl *decl)
+  {
+    for (DeclContext *ctx = decl->getLexicalDeclContext(); ctx != nullptr;
+         ctx = ctx->getLexicalParent()) {
+      /* TagDecl are handled in ParentRecordDeclHelper.  */
+      if (!isa<TagDecl>(ctx)) {
+        Dependencies.insert(cast<Decl>(ctx));
+      }
+    }
   }
 
   inline std::unordered_set<Decl *> &Get_Set(void)
