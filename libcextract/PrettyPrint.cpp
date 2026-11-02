@@ -220,6 +220,26 @@ void RecursivePrint::Print_Decl(Decl *decl)
       Print_Decl(child);
     }
     Out << "}\n";
+  } else if (isa<LinkageSpecDecl>(decl) &&
+             cast<LinkageSpecDecl>(decl)->hasBraces()) {
+    /* Same as namespaces, but for `extern "C" { ... }` blocks.  Printing it
+       as written would also output everything declared inside of it.  Blocks
+       without braces, as in `extern "C" int x;`, have a single decl, hence
+       they are printed as written below.  */
+    LinkageSpecDecl *linkagedecl = cast<LinkageSpecDecl>(decl);
+#if CLANG_VERSION_MAJOR >= 17
+    bool is_c = linkagedecl->getLanguage() == LinkageSpecLanguageIDs::C;
+#else
+    bool is_c = linkagedecl->getLanguage() == LinkageSpecDecl::lang_c;
+#endif
+
+    Out << "extern \"" << (is_c ? "C" : "C++") << "\" {\n";
+
+    for (auto child : linkagedecl->decls()) {
+      Print_Decl(child);
+    }
+
+    Out << "}\n";
   } else {
     Print_CE_Comment(decl);
     /* When handling C code, we need to check if given declaration is a function

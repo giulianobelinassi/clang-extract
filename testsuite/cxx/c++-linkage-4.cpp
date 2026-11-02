@@ -1,5 +1,4 @@
-/* { dg-options "-DCE_EXTRACT_FUNCTIONS=main -DCE_NO_EXTERNALIZATION" }*/
-/* { dg-xfail }*/
+/* { dg-options "-DCE_EXTRACT_FUNCTIONS=f -DCE_NO_EXTERNALIZATION" }*/
 
 typedef unsigned long size_t;
 typedef int unused_t;
