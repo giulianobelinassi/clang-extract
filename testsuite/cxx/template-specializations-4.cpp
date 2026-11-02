@@ -1,5 +1,4 @@
 /* { dg-options "-DCE_EXTRACT_FUNCTIONS=main -DCE_NO_EXTERNALIZATION" }*/
-/* { dg-xfail } */
 /* Fails until the closure analyzes the template declarations and their
    explicit and partial specializations.  */
 

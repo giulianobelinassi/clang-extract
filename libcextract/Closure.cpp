@@ -386,6 +386,24 @@ bool DeclClosureVisitor::VisitClassTemplateDecl(ClassTemplateDecl *decl)
     TRY_TO(TraverseDecl(param));
   }
 
+  /* Explicit specializations may be selected only through a dependent
+     expression, e.g. `is_small<int>` in:
+
+       template<typename T> struct is_small { static constexpr bool value = false; };
+       template<> struct is_small<int> { static constexpr bool value = true; };
+       template<typename T, bool Small = is_small<T>::value> struct storage;
+       storage<int> s;
+
+     The AST of `storage<int, true>` only keeps the evaluated `true`, so
+     nothing points to `is_small<int>`.  Without it, the default argument
+     evaluates differently in the extracted code.  Hence add the explicit
+     specializations which were referenced in the translation unit.  */
+  for (ClassTemplateSpecializationDecl *spec : decl->specializations()) {
+    if (spec->isExplicitSpecialization() && spec->isReferenced()) {
+      TRY_TO(TraverseDecl(spec));
+    }
+  }
+
   return VISITOR_CONTINUE;
 }
 
