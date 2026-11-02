@@ -1,7 +1,4 @@
 /* { dg-options "-DCE_EXTRACT_FUNCTIONS=main -DCE_NO_EXTERNALIZATION" }*/
-/* { dg-xfail } */
-/* Fails until the closure supports template specializations and dependent
-   template references.  */
 
 namespace std {
 

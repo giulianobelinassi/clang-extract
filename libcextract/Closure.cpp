@@ -377,6 +377,15 @@ bool DeclClosureVisitor::VisitClassTemplateDecl(ClassTemplateDecl *decl)
 {
   Closure.Add_Decl_And_Prevs(decl);
 
+  /* Analyze the template parameters, as their default arguments may reference
+     other decls, e.g. `is_small` in:
+
+       template<typename T, bool Small = is_small<T>::value>
+         struct storage;  */
+  for (NamedDecl *param : *decl->getTemplateParameters()) {
+    TRY_TO(TraverseDecl(param));
+  }
+
   return VISITOR_CONTINUE;
 }
 
@@ -393,6 +402,21 @@ bool DeclClosureVisitor::VisitClassTemplateSpecializationDecl(
   V<A> u;
   This call will add the A to the closure.  */
   TRY_TO(TraverseTemplateArguments(decl->getTemplateArgs().asArray()));
+
+  /* In case this specialization was instantiated from a partial
+     specialization, as `S<int, false>` from:
+
+       template<typename T, bool B> struct S;
+       template<typename T> struct S<T, false> { T x; };
+
+     then we also need it, as it has the definition.  */
+  auto specialized = decl->getSpecializedTemplateOrPartial();
+  if (auto *partial = dyn_cast<ClassTemplatePartialSpecializationDecl *>(specialized)) {
+    /* clang doesn't mark it as requiring a complete definition, which would
+       make us print it without its body.  */
+    partial->setCompleteDefinitionRequired(true);
+    TRY_TO(TraverseDecl(partial));
+  }
 
   /* This call will add the V to the closure.  */
   return VisitClassTemplateDecl(decl->getSpecializedTemplate());
@@ -515,7 +539,12 @@ bool DeclClosureVisitor::VisitTemplateSpecializationType(
 {
   /* For some reason the Traverse do not run on the original template
      C++ Record, only on its specializations.  Hence do it here.  */
-  return TraverseDecl(type->getAsCXXRecordDecl());
+  TRY_TO(TraverseDecl(type->getAsCXXRecordDecl()));
+
+  /* In case the type depends on a template parameter, e.g. `is_small<T>`,
+     there is no C++ Record to look into, hence analyze the template it
+     refers to.  */
+  return TraverseDecl(type->getTemplateName().getAsTemplateDecl());
 }
 
 bool DeclClosureVisitor::VisitDeducedTemplateSpecializationType(
